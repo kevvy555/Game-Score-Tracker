@@ -2,6 +2,7 @@ package com.kevvy555.gamescoretracker;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Context;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -10,7 +11,6 @@ import android.text.InputType;
 import android.view.Gravity;
 import android.view.ViewGroup;
 import android.view.inputmethod.InputMethodManager;
-import android.content.Context;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -21,12 +21,16 @@ import android.widget.Toast;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
 public final class MainActivity extends Activity {
     private static final String PREFS = "qwirkle_score_tracker";
     private static final String STATE_KEY = "active_game";
+    private static final String HISTORY_KEY = "game_history_v1";
 
     private static final int BG = Color.rgb(17, 19, 24);
     private static final int PANEL = Color.rgb(29, 32, 39);
@@ -36,16 +40,20 @@ public final class MainActivity extends Activity {
     private static final int ACCENT = Color.rgb(86, 203, 139);
 
     private final GameState game = new GameState();
+    private final GameHistory gameHistory = new GameHistory();
     private final List<EditText> nameInputs = new ArrayList<>();
     private int setupPlayerCount = 2;
     private EditText scoreInput;
+    private boolean hasActiveGame;
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
-        if (loadGame()) showGame(); else showSetup();
+        loadGameHistory();
+        hasActiveGame = loadGame();
+        if (hasActiveGame) showGame(); else showSetup();
     }
 
     private void showSetup() {
@@ -108,9 +116,20 @@ public final class MainActivity extends Activity {
         startParams.topMargin = dp(18);
         root.addView(start, startParams);
 
-        TextView note = text("Unofficial companion score tracker for Qwirkle®.", 12, Typeface.NORMAL, MUTED);
+        Button leaderboard = button("LEADERBOARD & HISTORY", PANEL_ACTIVE, TEXT);
+        leaderboard.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        leaderboard.setOnClickListener(v -> showLeaderboard());
+        LinearLayout.LayoutParams boardParams = new LinearLayout.LayoutParams(-1, dp(52));
+        boardParams.topMargin = dp(10);
+        root.addView(leaderboard, boardParams);
+
+        TextView note = text("Completed games are stored on this device.", 12, Typeface.NORMAL, MUTED);
         note.setGravity(Gravity.CENTER);
-        root.addView(note, top(18));
+        root.addView(note, top(16));
+
+        TextView trademark = text("Unofficial companion score tracker for Qwirkle®.", 12, Typeface.NORMAL, MUTED);
+        trademark.setGravity(Gravity.CENTER);
+        root.addView(trademark, top(4));
         setContentView(scroll);
     }
 
@@ -144,6 +163,7 @@ public final class MainActivity extends Activity {
             names.add(name.isEmpty() ? "Player " + (i + 1) : name);
         }
         game.startGame(names);
+        hasActiveGame = true;
         saveGame();
         hideKeyboard();
         showGame();
@@ -160,6 +180,12 @@ public final class MainActivity extends Activity {
         TextView title = text("QWIRKLE", 26, Typeface.BOLD, TEXT);
         title.setGravity(Gravity.CENTER);
         root.addView(title, wide());
+
+        Button leaderboard = button("LEADERBOARD", PANEL_ACTIVE, TEXT);
+        leaderboard.setOnClickListener(v -> showLeaderboard());
+        LinearLayout.LayoutParams leaderboardParams = new LinearLayout.LayoutParams(-1, dp(44));
+        leaderboardParams.topMargin = dp(8);
+        root.addView(leaderboard, leaderboardParams);
 
         TextView turn = text(game.getCurrentPlayer().getName() + "'s turn", 28, Typeface.BOLD, TEXT);
         turn.setGravity(Gravity.CENTER);
@@ -259,11 +285,11 @@ public final class MainActivity extends Activity {
         endParams.leftMargin = dp(5);
         controls.addView(end, endParams);
 
-        addHistory(root);
+        addTurnHistory(root);
         setContentView(scroll);
     }
 
-    private void addHistory(LinearLayout root) {
+    private void addTurnHistory(LinearLayout root) {
         if (game.getHistory().isEmpty()) return;
         root.addView(text("Recent turns", 17, Typeface.BOLD, TEXT), top(16));
         int first = Math.max(0, game.getHistory().size() - 8);
@@ -274,6 +300,120 @@ public final class MainActivity extends Activity {
             line.setBackground(rounded(PANEL, 9, 0, 0));
             root.addView(line, top(5));
         }
+    }
+
+    private void showLeaderboard() {
+        ScrollView scroll = new ScrollView(this);
+        scroll.setBackgroundColor(BG);
+        LinearLayout root = column();
+        root.setPadding(dp(16), dp(20), dp(16), dp(28));
+        scroll.addView(root);
+
+        TextView title = text("LEADERBOARD", 30, Typeface.BOLD, TEXT);
+        title.setGravity(Gravity.CENTER);
+        root.addView(title, wide());
+
+        List<GameHistory.LeaderboardEntry> board = gameHistory.getLeaderboard();
+        TextView subtitle = text(gameHistory.getRecords().size() + " completed game"
+                + (gameHistory.getRecords().size() == 1 ? "" : "s"), 14, Typeface.NORMAL, MUTED);
+        subtitle.setGravity(Gravity.CENTER);
+        root.addView(subtitle, top(2));
+
+        Button back = button(hasActiveGame ? "BACK TO GAME" : "NEW GAME", PANEL_ACTIVE, TEXT);
+        back.setOnClickListener(v -> {
+            if (hasActiveGame) showGame(); else showSetup();
+        });
+        LinearLayout.LayoutParams backParams = new LinearLayout.LayoutParams(-1, dp(48));
+        backParams.topMargin = dp(14);
+        root.addView(back, backParams);
+
+        if (board.isEmpty()) {
+            LinearLayout empty = card();
+            root.addView(empty, top(16));
+            TextView noGames = text("No completed games yet.", 20, Typeface.BOLD, TEXT);
+            noGames.setGravity(Gravity.CENTER);
+            empty.addView(noGames, wide());
+            TextView hint = text("Finish a game and its result will appear here.", 14, Typeface.NORMAL, MUTED);
+            hint.setGravity(Gravity.CENTER);
+            empty.addView(hint, top(8));
+            setContentView(scroll);
+            return;
+        }
+
+        GameHistory.LeaderboardEntry leader = board.get(0);
+        LinearLayout leadCard = card();
+        leadCard.setBackground(rounded(Color.rgb(35, 70, 52), 14, 2, ACCENT));
+        root.addView(leadCard, top(16));
+        TextView leadingLabel = text("CURRENT LEADER", 12, Typeface.BOLD, ACCENT);
+        leadingLabel.setGravity(Gravity.CENTER);
+        leadCard.addView(leadingLabel, wide());
+        TextView leadingName = text(leader.getName(), 30, Typeface.BOLD, TEXT);
+        leadingName.setGravity(Gravity.CENTER);
+        leadCard.addView(leadingName, top(4));
+        TextView leadingPoints = text(leader.getPoints() + " leaderboard point"
+                + (leader.getPoints() == 1 ? "" : "s"), 17, Typeface.BOLD, TEXT);
+        leadingPoints.setGravity(Gravity.CENTER);
+        leadCard.addView(leadingPoints, top(4));
+
+        root.addView(text("Standings", 19, Typeface.BOLD, TEXT), top(18));
+        for (int i = 0; i < board.size(); i++) {
+            GameHistory.LeaderboardEntry entry = board.get(i);
+            LinearLayout line = card();
+            line.setPadding(dp(14), dp(12), dp(14), dp(12));
+            root.addView(line, top(6));
+
+            LinearLayout heading = row();
+            heading.setGravity(Gravity.CENTER_VERTICAL);
+            line.addView(heading, wide());
+
+            TextView name = text((i + 1) + ".  " + entry.getName(), 19, Typeface.BOLD, TEXT);
+            heading.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
+
+            TextView points = text(entry.getPoints() + " pt" + (entry.getPoints() == 1 ? "" : "s"),
+                    20, Typeface.BOLD, i == 0 ? ACCENT : TEXT);
+            points.setGravity(Gravity.END);
+            heading.addView(points, new LinearLayout.LayoutParams(dp(92), -2));
+
+            String stats = entry.getGamesPlayed() + " games  •  "
+                    + entry.getTotalScore() + " total score  •  "
+                    + entry.getHighScore() + " best";
+            line.addView(text(stats, 13, Typeface.NORMAL, MUTED), top(5));
+        }
+
+        root.addView(text("Game history", 19, Typeface.BOLD, TEXT), top(22));
+        List<GameHistory.MatchRecord> records = gameHistory.getRecords();
+        for (int i = records.size() - 1; i >= 0; i--) {
+            GameHistory.MatchRecord record = records.get(i);
+            LinearLayout match = card();
+            match.setPadding(dp(14), dp(13), dp(14), dp(13));
+            root.addView(match, top(7));
+
+            match.addView(text(formatDateTime(record.getFinishedAtEpochMillis()),
+                    14, Typeface.BOLD, MUTED), wide());
+
+            String winnerLabel = record.getWinnerNames().size() == 1 ? "Winner: " : "Winners: ";
+            match.addView(text(winnerLabel + String.join(" & ", record.getWinnerNames()),
+                    17, Typeface.BOLD, ACCENT), top(5));
+
+            for (GameHistory.PlayerResult player : record.getPlayers()) {
+                LinearLayout scoreLine = row();
+                scoreLine.setGravity(Gravity.CENTER_VERTICAL);
+                match.addView(scoreLine, top(4));
+
+                TextView playerName = text(player.getName(), 16, Typeface.NORMAL, TEXT);
+                scoreLine.addView(playerName, new LinearLayout.LayoutParams(0, -2, 1));
+
+                TextView score = text(String.valueOf(player.getFinalScore()), 17, Typeface.BOLD, TEXT);
+                score.setGravity(Gravity.END);
+                scoreLine.addView(score, new LinearLayout.LayoutParams(dp(80), -2));
+            }
+        }
+
+        TextView rule = text("Each game winner earns 1 leaderboard point. Tied winners each earn 1 point.",
+                12, Typeface.NORMAL, MUTED);
+        rule.setGravity(Gravity.CENTER);
+        root.addView(rule, top(18));
+        setContentView(scroll);
     }
 
     private void addToInput(int amount) {
@@ -325,17 +465,23 @@ public final class MainActivity extends Activity {
         for (GameState.Player player : game.getPlayers()) {
             message.append(player.getName()).append(": ").append(player.getScore()).append('\n');
         }
+        message.append("\nSave this result to the leaderboard and end the game?");
 
         new AlertDialog.Builder(this)
-                .setTitle("Game over")
+                .setTitle("End game")
                 .setMessage(message.toString().trim())
-                .setNegativeButton("Keep playing", null)
-                .setPositiveButton("New game", (dialog, which) -> {
-                    setupPlayerCount = game.getPlayers().size();
-                    clearGame();
-                    showSetup();
-                })
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("END & SAVE", (dialog, which) -> completeGame())
                 .show();
+    }
+
+    private void completeGame() {
+        gameHistory.recordGame(game, System.currentTimeMillis());
+        saveGameHistory();
+        setupPlayerCount = game.getPlayers().size();
+        clearGame();
+        Toast.makeText(this, "Game saved to leaderboard", Toast.LENGTH_SHORT).show();
+        showLeaderboard();
     }
 
     private boolean loadGame() {
@@ -403,8 +549,81 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private void loadGameHistory() {
+        String raw = getSharedPreferences(PREFS, MODE_PRIVATE).getString(HISTORY_KEY, null);
+        if (raw == null || raw.isEmpty()) return;
+
+        try {
+            JSONArray records = new JSONArray(raw);
+            for (int i = 0; i < records.length(); i++) {
+                try {
+                    JSONObject saved = records.getJSONObject(i);
+                    List<GameHistory.PlayerResult> players = new ArrayList<>();
+                    JSONArray savedPlayers = saved.getJSONArray("players");
+                    for (int p = 0; p < savedPlayers.length(); p++) {
+                        JSONObject player = savedPlayers.getJSONObject(p);
+                        players.add(new GameHistory.PlayerResult(
+                                player.getString("name"),
+                                player.getInt("score")));
+                    }
+
+                    List<String> winners = new ArrayList<>();
+                    JSONArray savedWinners = saved.getJSONArray("winners");
+                    for (int w = 0; w < savedWinners.length(); w++) {
+                        winners.add(savedWinners.getString(w));
+                    }
+
+                    gameHistory.addRecord(new GameHistory.MatchRecord(
+                            saved.getLong("finishedAt"),
+                            players,
+                            winners));
+                } catch (Exception ignored) {
+                    // Keep valid older records if one saved match is malformed.
+                }
+            }
+        } catch (Exception ignored) {
+            // A corrupt history must never prevent the scorer from opening.
+        }
+    }
+
+    private void saveGameHistory() {
+        try {
+            JSONArray records = new JSONArray();
+            for (GameHistory.MatchRecord record : gameHistory.getRecords()) {
+                JSONObject saved = new JSONObject();
+                saved.put("finishedAt", record.getFinishedAtEpochMillis());
+
+                JSONArray players = new JSONArray();
+                for (GameHistory.PlayerResult player : record.getPlayers()) {
+                    JSONObject p = new JSONObject();
+                    p.put("name", player.getName());
+                    p.put("score", player.getFinalScore());
+                    players.put(p);
+                }
+                saved.put("players", players);
+
+                JSONArray winners = new JSONArray();
+                for (String winner : record.getWinnerNames()) winners.put(winner);
+                saved.put("winners", winners);
+
+                records.put(saved);
+            }
+
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                    .putString(HISTORY_KEY, records.toString())
+                    .apply();
+        } catch (Exception ex) {
+            Toast.makeText(this, "Could not save game history.", Toast.LENGTH_SHORT).show();
+        }
+    }
+
     private void clearGame() {
+        hasActiveGame = false;
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(STATE_KEY).apply();
+    }
+
+    private String formatDateTime(long epochMillis) {
+        return new SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.UK).format(new Date(epochMillis));
     }
 
     private void hideKeyboard() {

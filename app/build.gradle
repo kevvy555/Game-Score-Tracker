@@ -2,6 +2,9 @@ plugins {
     id 'com.android.application'
 }
 
+def signingStoreFilePath = System.getenv('ANDROID_KEYSTORE_FILE')
+def signingStorePasswordValue = System.getenv('ANDROID_KEYSTORE_PASSWORD')
+
 android {
     namespace 'com.kevvy555.gamescoretracker'
     compileSdk 35
@@ -10,12 +13,25 @@ android {
         applicationId 'com.kevvy555.gamescoretracker'
         minSdk 24
         targetSdk 35
-        versionCode 2
-        versionName '1.1.0'
+        versionCode 3
+        versionName '1.1.1'
+    }
+
+    signingConfigs {
+        release {
+            if (signingStoreFilePath && signingStorePasswordValue) {
+                storeFile file(signingStoreFilePath)
+                storePassword signingStorePasswordValue
+                keyAlias 'qwirkle'
+                keyPassword signingStorePasswordValue
+                storeType 'PKCS12'
+            }
+        }
     }
 
     buildTypes {
         release {
+            signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
